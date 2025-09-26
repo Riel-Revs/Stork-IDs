@@ -1,0 +1,194 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stork Community ID Badge Generator</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #0d0d0d; color: #fff; text-align: center; padding: 20px; }
+    h1 { color: #A5F8FF; }
+    form { max-width: 400px; margin: 0 auto 20px; text-align: left; }
+    input, button { width: 100%; margin: 10px 0; padding: 10px; border-radius: 6px; border: none; }
+    button { background: #001F3F; color: #A5F8FF; font-weight: bold; cursor: pointer; }
+    canvas { display: block; margin: 20px auto; border: 1px solid #ccc; }
+    #download { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Stork Community ID Badge Generator</h1>
+  <form id="badgeForm">
+    <label>X Handle:</label>
+    <input type="text" id="xHandle" placeholder="@YourHandle" required>
+    <label>A.k.a (Nickname):</label>
+    <input type="text" id="nickname" placeholder="Your Nickname">
+    <label>Discord Role:</label>
+    <input type="text" id="discordRole" placeholder="Your Role" required>
+    <label>Profile Picture (Upload or URL):</label>
+    <input type="file" id="pfpFile" accept="image/*">
+    <input type="text" id="pfpUrl" placeholder="Or enter image URL">
+    <button type="submit">Generate Badge</button>
+  </form>
+
+  <canvas id="badgeCanvas" width="900" height="450"></canvas>
+  <div id="download"></div>
+
+  <script>
+    const form = document.getElementById('badgeForm');
+    const canvas = document.getElementById('badgeCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.src = src;
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+      });
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const xHandle = document.getElementById('xHandle').value;
+      const nickname = document.getElementById('nickname').value;
+      const discordRole = document.getElementById('discordRole').value;
+      let pfpSrc = document.getElementById('pfpUrl').value;
+
+      const pfpFile = document.getElementById('pfpFile').files[0];
+      if (pfpFile) {
+        pfpSrc = await new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.readAsDataURL(pfpFile);
+        });
+      }
+
+      let pfpImage = null;
+      if (pfpSrc) {
+        try {
+          pfpImage = await loadImage(pfpSrc);
+        } catch (err) {
+          alert("Could not load profile picture.");
+        }
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw front card (left)
+      drawCard(50, 50, xHandle, nickname, discordRole, pfpImage, "front");
+
+      // Draw back card (right)
+      drawCard(500, 50, xHandle, nickname, discordRole, null, "back");
+
+      const downloadDiv = document.getElementById('download');
+      downloadDiv.innerHTML = '<a href="' + canvas.toDataURL('image/png') + '" download="stork-badge.png">Download Your Badge</a>';
+    });
+
+    function drawSlotAndRope(ctx, xOffset) {
+      // Rope (neutral gray)
+      ctx.strokeStyle = "#cccccc";
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(xOffset + 120, 40);
+      ctx.quadraticCurveTo(xOffset + 160, 0, xOffset + 200, 40);
+      ctx.stroke();
+
+      // Slot (light cyan)
+      ctx.fillStyle = "#E0F9FF";
+      ctx.strokeStyle = "#001F3F";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(xOffset + 140, 45, 40, 12, 6);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawCard(xOffset, yOffset, handle, nickname, role, pfpImage, side) {
+      // Card background
+      ctx.fillStyle = "#001F3F";
+      ctx.fillRect(xOffset, yOffset, 350, 400);
+
+      // Decorative cyan accent
+      const grad = ctx.createLinearGradient(xOffset, yOffset, xOffset+350, yOffset+400);
+      grad.addColorStop(0, "rgba(165,248,255,0.12)");
+      grad.addColorStop(1, "rgba(0,31,63,0.5)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(xOffset, yOffset+150);
+      ctx.lineTo(xOffset+350, yOffset);
+      ctx.lineTo(xOffset+350, yOffset+200);
+      ctx.closePath();
+      ctx.fill();
+
+      // Border
+      ctx.strokeStyle = "#A5F8FF";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(xOffset, yOffset, 350, 400);
+
+      // Rope + slot
+      drawSlotAndRope(ctx, xOffset);
+
+      if (side === "front") {
+        // Profile picture
+        if (pfpImage) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(xOffset+175, yOffset+180, 70, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(pfpImage, xOffset+105, yOffset+110, 140, 140);
+          ctx.restore();
+
+          // Glow ring
+          ctx.strokeStyle = "#A5F8FF";
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.arc(xOffset+175, yOffset+180, 72, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // X Handle
+        ctx.fillStyle = "#A5F8FF";
+        ctx.font = "bold 22px Arial";
+        ctx.fillText(handle.replace("@",""), xOffset+50, yOffset+300);
+
+        // Nickname
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "16px Arial";
+        ctx.fillText("A.k.a " + nickname, xOffset+50, yOffset+330);
+
+        // Role
+        ctx.font = "italic 16px Arial";
+        ctx.fillText(role, xOffset+50, yOffset+360);
+
+        // Logo (professional placement bottom-right)
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "bold 26px Arial";
+        ctx.fillText("Stork", xOffset+260, yOffset+380);
+      } else {
+        // Back side: handle + role
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "16px Arial";
+        ctx.fillText(handle, xOffset+30, yOffset+80);
+        ctx.fillText(role, xOffset+30, yOffset+110);
+
+        ctx.fillStyle = "#A5F8FF";
+        ctx.fillText("A.k.a " + nickname, xOffset+30, yOffset+140);
+
+        // Barcode
+        ctx.fillStyle = "#FFFFFF";
+        for (let i = 0; i < 12; i++) {
+          const barHeight = 60 + (i % 3) * 10;
+          ctx.fillRect(xOffset+40 + i*20, yOffset+280, 8, barHeight);
+        }
+
+        // Logo watermark
+        ctx.fillStyle = "rgba(165,248,255,0.15)";
+        ctx.font = "bold 70px Arial";
+        ctx.fillText("STORK", xOffset+50, yOffset+230);
+      }
+    }
+  </script>
+</body>
+</html>
