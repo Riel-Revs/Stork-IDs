@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>StorkOracle — Double-sided ID Badge Generator (with Slot)</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#001F3F;
+    --cyan:#A5F8FF;
+    --slot:#E0F9FF;
+    --muted:#BCC8D0;
+    --card-w:560px;
+    --card-h:320px;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#071226;color:#e6f0f5;}
+  .wrap{max-width:1100px;margin:28px auto;padding:20px;}
+  h1{font-weight:700;margin:0 0 18px;color:var(--cyan);text-align:center}
+  .content{display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;justify-content:center}
+  .panel{background:#071A2B;padding:18px;border-radius:12px;box-shadow:0 8px 30px rgba(2,10,20,0.6);min-width:320px;}
+  form{display:flex;flex-direction:column;gap:8px;min-width:280px}
+  label{font-size:13px;color:var(--muted);margin-top:6px}
+  input[type="text"], input[type="url"], input[type="file"], select{padding:10px;border-radius:8px;border:1px solid rgba(165,248,255,0.08);background:#071726;color:#eaf6fb;outline:none}
+  .controls{display:flex;gap:8px;margin-top:8px}
+  button{cursor:pointer;padding:10px 14px;border-radius:10px;border:none;font-weight:600}
+  .btn-generate{background:linear-gradient(90deg,var(--cyan),#7fe7ff);color:#001;box-shadow:0 6px 18px rgba(165,248,255,0.08)}
+  .btn-download{background:transparent;border:2px solid var(--cyan);color:var(--cyan);}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  /* Card flip scene */
+  .scene{width:var(--card-w);height:var(--card-h);perspective:1400px;margin:8px auto;cursor:pointer}
+  .card{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.2,.9,.3,1);}
+  .card.flipped{transform:rotateY(180deg);}
+  .side{position:absolute;inset:0;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,0.6);backface-visibility:hidden;overflow:hidden;}
+  .side canvas{display:block;width:100%;height:100%;border-radius:14px;}
+  .backside{transform:rotateY(180deg);}
+  .meta{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:6px;color:var(--muted);font-size:13px}
+  @media (max-width:880px){
+    .content{flex-direction:column;align-items:center}
+    .scene{transform:scale(.9)}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>StorkOracle — Double-sided ID Badge Generator</h1>
+    <div class="content">
+      <div class="panel" style="flex:0 0 380px;">
+        <form id="badgeForm" autocomplete="off" novalidate>
+          <label for="handle">X Handle (include @ or not)</label>
+          <input id="handle" type="text" placeholder="@RielRevs" required value="">
+
+          <label for="aka">Nickname (A.k.a)</label>
+          <input id="aka" type="text" placeholder="e.g. The Oracle">
+
+          <label for="role">Discord Role</label>
+          <select id="role" required>
+            <option value="Peep">Peep</option>
+            <option value="Winged">Winged</option>
+            <option value="Songbird">Songbird</option>
+            <option value="Wayfinder">Wayfinder</option>
+            <option value="Skymaster">Skymaster</option>
+            <option value="Mod">Mod</option>
+          </select>
+
+          <label for="pfpFile">Profile Picture (upload preferred)</label>
+          <input id="pfpFile" type="file" accept="image/*">
+
+          <label for="pfpUrl">Or paste image URL (may be blocked by CORS)</label>
+          <input id="pfpUrl" type="url" placeholder="https://...">
+
+          <div class="controls">
+            <button id="generateBtn" type="button" class="btn-generate">Generate Preview</button>
+            <button id="downloadBtn" type="button" class="btn-download">Download Badge</button>
+          </div>
+          <div class="hint">Tip: For guaranteed download, use the <strong>Upload</strong> option for profile pictures. Click the card to flip.</div>
+        </form>
+      </div>
+
+      <div style="flex:0 0 560px; text-align:center;">
+        <div class="scene" id="scene" title="Click to flip (front/back)">
+          <div class="card" id="card" aria-hidden="false">
+            <div class="side front" aria-hidden="false">
+              <canvas id="frontCanvas" width="560" height="320" aria-label="Front side preview"></canvas>
+            </div>
+            <div class="side back backside" aria-hidden="true">
+              <canvas id="backCanvas" width="560" height="320" aria-label="Back side preview"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="meta">Click the badge to flip • Front shows handle, role, nickname & photo • Back shows handle, role & QR code</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // Design constants (CSS pixels)
+  const CARD_W = 560;
+  const CARD_H = 320;
+  const DPR = Math.max(1, window.devicePixelRatio || 1);
+
+  // Colors
+  const NAVY = '#001F3F';
+  const CYAN = '#A5F8FF';
+  const SLOT = '#E0F9FF';
+  const WHITE = '#FFFFFF';
+  const MUTED = '#BCC8D0';
+
+  // Elements
+  const frontCanvas = document.getElementById('frontCanvas');
+  const backCanvas = document.getElementById('backCanvas');
+  const cardEl = document.getElementById('card');
+  const scene = document.getElementById('scene');
+  const generateBtn = document.getElementById('generateBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+
+  // Inputs
+  const inputHandle = document.getElementById('handle');
+  const inputRole = document.getElementById('role');
+  const inputAka = document.getElementById('aka');
+  const inputPfpFile = document.getElementById('pfpFile');
+  const inputPfpUrl = document.getElementById('pfpUrl');
+  
+  // Custom QR Code Destination
+  const QR_CODE_URL = 'https://www.stork.network/'; 
+
+  // Role images mapping (Assume files are named as role_emoji.png for clarity)
+  const roleImages = {
+    'Peep': 'peep.jpeg', // Assuming you have these emoji image files
+    'Winged': 'winged.jpeg',
+    'Songbird': 'songbird.jpeg',
+    'Wayfinder': 'wayfinder.jpeg',
+    'Skymaster': 'skymaster.jpeg',
+    'Mod': 'mod.jpeg'
+  };
+
+  // Image cache
+  const imageCache = {};
+
+  // Prepare canvases for high DPI
+  function prepareCanvas(canvas){
+    canvas.width = CARD_W * DPR;
+    canvas.height = CARD_H * DPR;
+    canvas.style.width = CARD_W + 'px';
+    canvas.style.height = CARD_H + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    return ctx;
+  }
+  const fctx = prepareCanvas(frontCanvas);
+  const bctx = prepareCanvas(backCanvas);
+
+  function roundRectPath(ctx, x, y, w, h, r) {
+    if (r < 0) r = 0;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // Load image helper (supports dataURL and URLs). Uses crossOrigin for remote urls.
+  function loadImage(src){
+    return new Promise((resolve, reject) => {
+      if (!src) return reject(new Error('no-src'));
+      const img = new Image();
+      if (/^https?:\/\//i.test(src)) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(e);
+      // Check cache first
+      if(imageCache[src]) return resolve(imageCache[src]);
+      img.src = src;
+    });
+  }
+
+  // Load all required images
+  async function loadImages(data) {
+    // 1. Load WATERMARK and LOGO (same image, different usage)
+    const logoSrc = 'stork-logo.jpeg'; // Assuming this file exists
+    if (!imageCache[logoSrc]) {
+        try {
+            imageCache[logoSrc] = await loadImage(logoSrc);
+        } catch (e) {
+            console.warn('Logo/Watermark image not found or blocked:', e);
+            imageCache[logoSrc] = null;
+        }
+    }
+    data.watermarkImg = imageCache[logoSrc];
+    data.logoImg = imageCache[logoSrc];
+
+    // 2. Load Role image (emoji)
+    const roleImageFile = roleImages[data.role];
+    if (roleImageFile && !imageCache[roleImageFile]) {
+      try {
+        imageCache[roleImageFile] = await loadImage(roleImageFile);
+      } catch (e) {
+        console.warn(`Role emoji image ${roleImageFile} not found or blocked:`, e);
+        imageCache[roleImageFile] = null;
+      }
+    }
+    data.roleImg = imageCache[roleImageFile] || null;
+    
+    // 3. Load QR Code image (must be done by an external library or service for proper QR code generation)
+    // For this demonstration, we'll use a public QR code API if the user has provided a URL that works.
+    // NOTE: This uses an external service and may be blocked by CORS or network policies.
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(QR_CODE_URL)}`;
+    if (!imageCache[qrCodeUrl]) {
+        try {
+            imageCache[qrCodeUrl] = await loadImage(qrCodeUrl);
+        } catch (e) {
+            console.warn('QR Code image not found or blocked:', e);
+            imageCache[qrCodeUrl] = null;
+        }
+    }
+    data.qrImg = imageCache[qrCodeUrl];
+  }
+
+  // --- START MODIFIED DRAWING FUNCTIONS ---
+
+  // Custom QR Code Draw function (now attempts to use a real QR image)
+  function drawQRCode(ctx, data, x, y, size) {
+    if (data.qrImg) {
+        // Draw the real QR Code image
+        ctx.drawImage(data.qrImg, x, y, size, size);
+    } else {
+        // Fallback to the original placeholder if image fails to load
+        const cellSize = size / 21; 
+        ctx.fillStyle = WHITE;
+        ctx.fillRect(x, y, size, size);
+        ctx.fillStyle = NAVY;
+        ctx.fillRect(x, y, cellSize * 7, cellSize * 7);
+        ctx.fillRect(x + size - cellSize * 7, y, cellSize * 7, cellSize * 7);
+        ctx.fillRect(x, y + size - cellSize * 7, cellSize * 7, cellSize * 7);
+        ctx.fillStyle = WHITE;
+        ctx.fillRect(x + cellSize * 2, y + cellSize * 2, cellSize * 3, cellSize * 3);
+        ctx.fillRect(x + size - cellSize * 5, y + cellSize * 2, cellSize * 3, cellSize * 3);
+        ctx.fillRect(x + cellSize * 2, y + size - cellSize * 5, cellSize * 3, cellSize * 3);
+    }
+    
+    // Add text below QR code
+    ctx.fillStyle = MUTED;
+    ctx.font = '400 10px Inter, Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('SCAN FOR COMMUNITY WEBSITE', x + size/2, y + size + 14);
+    ctx.textAlign = 'start';
+  }
+
+  // Common logo draw at bottom-right 
+  const drawLogoFooter = (ctx, logoImg) => {
+      if (!logoImg) return;
+      
+      const logoH = 20; // smaller logo height for cleaner look
+      const logoW = logoH * (logoImg.width / logoImg.height);
+      const textX = CARD_W - 20;
+      const textY = CARD_H - 18;
+      
+      // 1. Add "powered by stork" text
+      ctx.fillStyle = MUTED;
+      ctx.font = '600 10px Inter, Arial';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('powered by stork', textX, textY);
+      
+      // 2. Draw logo next to the text
+      const logoX = textX - 8;
+      const logoY = textY - logoH;
+      ctx.drawImage(logoImg, logoX - logoW, logoY, logoW, logoH);
+      
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+  };
+
+  // Draw a single card side into ctx using data
+  async function drawCard(ctx, data, side='front'){
+    // Load required images first
+    await loadImages(data);
+    
+    // clear
+    ctx.clearRect(0,0,CARD_W,CARD_H);
+
+    // background with subtle gradient
+    const g = ctx.createLinearGradient(0,0,CARD_W,CARD_H);
+    g.addColorStop(0, NAVY);
+    g.addColorStop(1, '#001426');
+    roundRectPath(ctx, 0, 0, CARD_W, CARD_H, 14);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // Watermark logo (Change #2: Watermark at front and back)
+    if (data.watermarkImg) {
+      ctx.save();
+      ctx.globalAlpha = 0.1;
+      const wmSize = 300;
+      const wmX = (CARD_W - wmSize) / 2;
+      const wmY = (CARD_H - wmSize) / 2;
+      ctx.drawImage(data.watermarkImg, wmX, wmY, wmSize, wmSize);
+      ctx.restore();
+    }
+
+    // border
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = CYAN;
+    roundRectPath(ctx, 0, 0, CARD_W, CARD_H, 14);
+    ctx.stroke();
+
+    // Painted rounded slot (top-center)
+    const slotW = Math.round(CARD_W * 0.15); // ~84px
+    const slotH = Math.round(CARD_H * 0.04); // ~12px
+    const slotX = Math.round((CARD_W - slotW) / 2);
+    const slotY = 8; // slightly down from top
+    // draw a subtle clip bar behind slot for realism
+    const clipW = slotW + 18;
+    const clipH = slotH + 10;
+    const clipX = Math.round((CARD_W - clipW) / 2);
+    const clipY = slotY - Math.round(clipH * 0.5);
+    ctx.fillStyle = '#00111a';
+    roundRectPath(ctx, clipX, clipY, clipW, clipH, 6);
+    ctx.fill();
+    // draw slot on top
+    ctx.fillStyle = SLOT;
+    roundRectPath(ctx, slotX, slotY, slotW, slotH, slotH/2);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = NAVY;
+    roundRectPath(ctx, slotX, slotY, slotW, slotH, slotH/2);
+    ctx.stroke();
+
+    // Decorative top-left accent (subtle)
+    ctx.fillStyle = 'rgba(165,248,255,0.04)';
+    ctx.fillRect(16, 16, 120, 12);
+
+    if (side === 'front') {
+      // Layout: left - circular PFP; right - text lines
+      const pad = 28;
+      const avatarX = pad + 70;
+      const avatarY = CARD_H/2 - 10;
+      const avatarR = 68;
+
+      // Avatar (circle mask)
+      if (data.pfpImg) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI*2);
+        ctx.closePath();
+        ctx.clip();
+
+        // draw image centered & cropped
+        const iw = data.pfpImg.width;
+        const ih = data.pfpImg.height;
+        const scale = Math.max((avatarR*2)/iw, (avatarR*2)/ih);
+        const sw = (avatarR*2)/scale;
+        const sh = (avatarR*2)/scale;
+        const sx = (iw - sw)/2;
+        const sy = (ih - sh)/2;
+        ctx.drawImage(data.pfpImg, sx, sy, sw, sh, avatarX - avatarR, avatarY - avatarR, avatarR*2, avatarR*2);
+        ctx.restore();
+
+        // subtle ring glow
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avatarX, avatarY, avatarR+4, 0, Math.PI*2);
+        ctx.strokeStyle = 'rgba(165,248,255,0.25)';
+        ctx.lineWidth = 6;
+        ctx.shadowColor = CYAN;
+        ctx.shadowBlur = 14;
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        // placeholder circle with gradient
+        const pg = ctx.createLinearGradient(avatarX - avatarR, avatarY - avatarR, avatarX + avatarR, avatarY + avatarR);
+        pg.addColorStop(0, '#0f2b3d');
+        pg.addColorStop(1, '#18394a');
+        ctx.fillStyle = pg;
+        ctx.beginPath();
+        ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI*2);
+        ctx.fill();
+        // initials
+        const initials = (data.aka || data.handle || 'U').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase();
+        ctx.fillStyle = CYAN;
+        ctx.font = '700 28px Inter, Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(initials, avatarX, avatarY);
+        ctx.textAlign = 'start';
+      }
+
+      // Change #3: Role emoji below PFP (position adjusted)
+      if (data.roleImg) {
+        const roleImgSize = 36;
+        const roleImgX = avatarX - roleImgSize/2;
+        const roleImgY = avatarY + avatarR + 10; // Positioned below the PFP circle
+        ctx.drawImage(data.roleImg, roleImgX, roleImgY, roleImgSize, roleImgSize);
+      }
+
+      // Right side text
+      const textX = 220;
+      let y = 92;
+      // Handle (big)
+      ctx.fillStyle = CYAN;
+      ctx.font = '700 28px Inter, Arial';
+      const handleText = data.handleClean || data.handle || '';
+      ctx.fillText(handleText, textX, y);
+
+      // Role (white)
+      y += 36;
+      ctx.fillStyle = WHITE;
+      ctx.font = '600 18px Inter, Arial';
+      ctx.fillText(data.role || '', textX, y);
+
+      // A.k.a (muted)
+      if (data.aka) {
+        y += 30;
+        ctx.fillStyle = '#C6D7DE';
+        ctx.font = 'italic 16px Inter, Arial';
+        ctx.fillText(`A.k.a ${data.aka}`, textX, y);
+      }
+
+      // Small arrow accent top-right
+      ctx.fillStyle = CYAN;
+      ctx.font = 'bold 28px Inter, Arial';
+      ctx.fillText('→', CARD_W - 46, 52);
+
+      // optional small subtle ID line near bottom-left
+      ctx.fillStyle = 'rgba(165,248,255,0.08)';
+      ctx.fillRect(24, CARD_H - 72, 180, 2);
+
+      // Change #1: Draw logo/footer
+      drawLogoFooter(ctx, data.logoImg);
+    } else {
+      // BACK SIDE
+      // right-side triangular geometric accent
+      const gx = ctx.createLinearGradient(CARD_W - 160, 60, CARD_W - 20, CARD_H - 40);
+      gx.addColorStop(0, CYAN);
+      gx.addColorStop(1, NAVY);
+      ctx.beginPath();
+      ctx.moveTo(CARD_W - 160, 40);
+      ctx.lineTo(CARD_W - 20, CARD_H/2);
+      ctx.lineTo(CARD_W - 160, CARD_H - 40);
+      ctx.closePath();
+      ctx.fillStyle = gx;
+      ctx.fill();
+
+      // Handle small
+      ctx.fillStyle = WHITE;
+      ctx.font = '600 18px Inter, Arial';
+      ctx.fillText(data.handleDisplay || data.handle || '', 32, 64);
+
+      // Role
+      ctx.fillStyle = CYAN;
+      ctx.font = '600 16px Inter, Arial';
+      ctx.fillText(data.role || '', 32, 96);
+
+      // A.k.a if present
+      if (data.aka) {
+        ctx.fillStyle = '#c9d6dd';
+        ctx.font = 'italic 14px Inter, Arial';
+        ctx.fillText(`A.k.a ${data.aka}`, 32, 124);
+      }
+
+      // QR Code region (bottom-left) - Change #5: Use real QR code image
+      const qrSize = 100;
+      const qrX = 32;
+      const qrY = CARD_H - qrSize - 40; // Adjusted for better spacing
+      drawQRCode(ctx, data, qrX, qrY, qrSize);
+
+      // Change #1: Draw logo/footer
+      drawLogoFooter(ctx, data.logoImg);
+    }
+  }
+
+  // --- END MODIFIED DRAWING FUNCTIONS ---
+
+  // Toggle flip on click & keyboard
+  scene.addEventListener('click', ()=>cardEl.classList.toggle('flipped'));
+  scene.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cardEl.classList.toggle('flipped'); } });
+  scene.tabIndex = 0;
+
+  // Build data & draw both sides
+  async function renderPreview(){
+    const rawHandle = (inputHandle.value || '').trim();
+    if (!rawHandle) { alert('Please enter an X handle'); return; }
+
+    const handleDisplay = rawHandle.startsWith('@') ? rawHandle : '@' + rawHandle;
+    const handleClean = rawHandle.replace(/^@/, '');
+
+    const role = inputRole.value;
+    const aka = (inputAka.value || '').trim();
+
+    // Prepare data
+    const data = { handleDisplay, handleClean, role, aka, pfpImg: null, logoImg: null, watermarkImg: null, roleImg: null, handle: handleDisplay, qrImg: null };
+
+    // Get PFP: file preferred
+    const file = inputPfpFile.files[0];
+    if (file) {
+      // read as dataURL
+      const reader = new FileReader();
+      reader.onload = async function(ev){
+        try {
+          data.pfpImg = await loadImage(ev.target.result);
+        } catch (err) {
+          console.warn('Failed to load pfp data url', err);
+        }
+        // draw both canvases
+        await drawCard(fctx, data, 'front');
+        await drawCard(bctx, data, 'back');
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    // Else try URL if provided
+    const url = (inputPfpUrl.value || '').trim();
+    if (url) {
+      try {
+        data.pfpImg = await loadImage(url);
+      } catch (e) {
+        alert('Could not load image from URL due to CORS or network. Use file upload for guaranteed results.');
+        data.pfpImg = null;
+      }
+    }
+
+    // draw both sides
+    await drawCard(fctx, data, 'front');
+    await drawCard(bctx, data, 'back');
+  }
+
+  // Hook generate button
+  generateBtn.addEventListener('click', renderPreview);
+
+  // Download both sides combined (stacked vertically)
+  downloadBtn.addEventListener('click', async ()=>{
+    // Ensure preview exists and is up-to-date
+    await renderPreview();
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = CARD_W * DPR;
+    outCanvas.height = (CARD_H * 2) * DPR; // Removed the gap for simpler download
+    const octx = outCanvas.getContext('2d');
+    octx.setTransform(DPR,0,0,DPR,0,0);
+
+    // draw front at y=0
+    octx.drawImage(frontCanvas, 0, 0, CARD_W, CARD_H);
+    // draw back at y = CARD_H
+    octx.drawImage(backCanvas, 0, CARD_H, CARD_W, CARD_H);
+
+    // create download
+    const dataURL = outCanvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = dataURL;
+    a.download = 'stork-badge.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+
+  // Auto-generate a default preview for convenience
+  setTimeout(()=>{
+    if (!inputHandle.value) inputHandle.value = '@YourHandle';
+    renderPreview();
+  }, 300);
+})();
+</script>
+</body>
+</html>
